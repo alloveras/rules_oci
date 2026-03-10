@@ -1,5 +1,6 @@
 load("@aspect_bazel_lib//lib:utils.bzl", bazel_lib_utils = "utils")
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load(":platform.bzl", "oci_platform")
 
 exports_files(
     glob(["*.bzl"]),
@@ -84,5 +85,45 @@ bzl_library(
 bzl_library(
     name = "toolchain",
     srcs = ["toolchain.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "platform",
+    srcs = ["platform.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@aspect_bazel_lib//lib:copy_to_directory",
+    ],
+)
+
+# Global label flag for platform info. Override with:
+#   --@rules_oci//oci:platform_info=//my:custom_platforms
+# to change the default OCIPlatformInfo used by oci_image across all targets.
+label_flag(
+    name = "platform_info",
+    build_setting_default = ":baseline-platforms",
+    visibility = ["//visibility:public"],
+)
+
+# A pre-built oci_platform that uses select() to cover all platforms
+# supported by this ruleset. Provides OCIPlatformInfo based on the
+# currently configured target platform.
+oci_platform(
+    name = "baseline-platforms",
+    os = select({
+        "@platforms//os:linux":   "linux",
+        "@platforms//os:osx":     "darwin",
+        "@platforms//os:windows": "windows",
+    }),
+    cpu = select({
+        "@platforms//cpu:x86_64":  "amd64",
+        "@platforms//cpu:aarch64": "arm64",
+        "@platforms//cpu:armv7":   "arm",
+        "@platforms//cpu:ppc64le": "ppc64le",
+        "@platforms//cpu:s390x":   "s390x",
+        "@platforms//cpu:x86_32":  "386",
+        "@platforms//cpu:mips64":  "mips64le",
+    }),
     visibility = ["//visibility:public"],
 )

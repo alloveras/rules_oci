@@ -2,6 +2,7 @@
 
 load("@aspect_bazel_lib//lib:resource_sets.bzl", "resource_set", "resource_set_attr")
 load("@bazel_features//:features.bzl", "bazel_features")
+load("//oci:platform.bzl", "OCIPlatformInfo")
 load("util.bzl", "util")
 
 _ACCEPTED_TAR_EXTENSIONS = [
@@ -94,6 +95,11 @@ If `group/gid` is not specified, the default group and supplementary groups of t
     "variant": attr.string(doc = "The variant of the specified CPU architecture. eg: `v6`, `v7`, `v8`. See: https://github.com/opencontainers/image-spec/blob/main/image-index.md#platform-variants for more."),
     "labels": attr.label(doc = "A file containing a dictionary of labels. Each line should be in the form `name=value`.", allow_single_file = True),
     "annotations": attr.label(doc = "A file containing a dictionary of annotations. Each line should be in the form `name=value`.", allow_single_file = True),
+    "_platform": attr.label(
+        default = "//oci:platform_info",
+        providers = [OCIPlatformInfo],
+        doc = "Fallback OCIPlatformInfo when the base image does not provide it. Defaults to the //oci:platform_info label flag.",
+    ),
     "_image_sh": attr.label(default = "image.sh", allow_single_file = True),
     "_descriptor_sh": attr.label(default = "descriptor.sh", executable = True, cfg = "exec", allow_single_file = True),
 } | util.IS_EXEC_PLATFORM_WINDOWS_ATTRS
@@ -171,6 +177,18 @@ def _oci_image_impl(ctx):
     transitive_inputs = []
 
     args = ctx.actions.args()
+
+    # Determine OCIPlatformInfo for this image (used by oci_image_index to craft manifest platform entries).
+    #
+    # Scratch images (os/architecture set explicitly): the user is making a declarative claim about
+    # the image's platform — honor it directly, independent of the current Bazel target platform.
+    #
+    # Base images: base and tars are expected to be configured for the current Bazel target platform
+    # (typically via a platform transition in oci_image_index), so _platform is authoritative.
+    if ctx.attr.os:
+        plat_info = OCIPlatformInfo(os = ctx.attr.os, cpu = ctx.attr.architecture, variant = ctx.attr.variant or None)
+    else:
+        plat_info = ctx.attr._platform[OCIPlatformInfo]
 
     if ctx.attr.base:
         # reuse given base image
@@ -270,6 +288,7 @@ def _oci_image_impl(ctx):
             files = depset([output]),
             runfiles = ctx.runfiles(transitive_files = depset(transitive = transitive_inputs)),
         ),
+        plat_info,
     ]
 
 oci_image = rule(

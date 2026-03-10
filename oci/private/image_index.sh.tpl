@@ -14,14 +14,29 @@ function mkdirp() {
 function add_image() {
     local image_path="$1"
     local output_path="$2"
+    local os="$3"
+    local arch="$4"
+    local variant="$5"
 
     local manifests=$("${JQ}" -c '.manifests[]' "${image_path}/index.json")
 
     for manifest in "${manifests}"; do
         local manifest_blob_path=$("${JQ}" -r '.digest | sub(":"; "/")' <<< ${manifest})
-        local config_blob_path=$("${JQ}" -r '.config.digest | sub(":"; "/")' "${image_path}/blobs/${manifest_blob_path}")
 
-        local platform=$("${JQ}" -c '{"os": .os, "architecture": .architecture, "variant": .variant, "os.version": .["os.version"], "os.features": .["os.features"]} | with_entries(select( .value != null ))' "${image_path}/blobs/${config_blob_path}")
+        local platform
+        if [[ -n "${os}" && -n "${arch}" ]]; then
+            if [[ -n "${variant}" ]]; then
+                platform=$("${JQ}" -n --arg os "${os}" --arg arch "${arch}" --arg variant "${variant}" \
+                    '{"os": $os, "architecture": $arch, "variant": $variant}')
+            else
+                platform=$("${JQ}" -n --arg os "${os}" --arg arch "${arch}" \
+                    '{"os": $os, "architecture": $arch}')
+            fi
+        else
+            local config_blob_path=$("${JQ}" -r '.config.digest | sub(":"; "/")' "${image_path}/blobs/${manifest_blob_path}")
+            platform=$("${JQ}" -c '{"os": .os, "architecture": .architecture, "variant": .variant, "os.version": .["os.version"], "os.features": .["os.features"]} | with_entries(select( .value != null ))' "${image_path}/blobs/${config_blob_path}")
+        fi
+
         "${JQ}" --argjson platform "${platform}" \
                 --argjson manifest "${manifest}" \
                 '.manifests += [$manifest + {"platform": $platform}]'\
@@ -43,18 +58,27 @@ function create_oci_layout() {
     local path="$1"
     mkdirp "${path}"
 
-    echo '{"imageLayoutVersion": "1.0.0"}' > "${path}/oci-layout" 
+    echo '{"imageLayoutVersion": "1.0.0"}' > "${path}/oci-layout"
     echo '{"schemaVersion": 2, "manifests": []}' > "${path}/index.json"
     echo '{"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json", "manifests": []}' > "${path}/manifest_list.json"
 }
 
 CURRENT_IMAGE=""
+CURRENT_OS=""
+CURRENT_ARCH=""
+CURRENT_VARIANT=""
 OUTPUT=""
 
 for ARG in "$@"; do
     case "$ARG" in
         (--output=*) OUTPUT="${ARG#--output=}"; create_oci_layout "$OUTPUT" ;;
-        (--image=*) CURRENT_IMAGE="${ARG#--image=}"; add_image "$CURRENT_IMAGE" "$OUTPUT" ;;
+        (--os=*) CURRENT_OS="${ARG#--os=}"; CURRENT_ARCH=""; CURRENT_VARIANT="" ;;
+        (--architecture=*) CURRENT_ARCH="${ARG#--architecture=}" ;;
+        (--variant=*) CURRENT_VARIANT="${ARG#--variant=}" ;;
+        (--image=*)
+            CURRENT_IMAGE="${ARG#--image=}"
+            add_image "$CURRENT_IMAGE" "$OUTPUT" "$CURRENT_OS" "$CURRENT_ARCH" "$CURRENT_VARIANT"
+            ;;
         (--blob=*) copy_blob "${CURRENT_IMAGE}" "$OUTPUT" "${ARG#--blob=}" ;;
         (*) echo "Unknown argument ${ARG}"; exit 1;;
     esac

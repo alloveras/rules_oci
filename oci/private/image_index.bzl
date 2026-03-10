@@ -1,5 +1,7 @@
 "Implementation details for oci_image_index rule"
 
+load("//oci:platform.bzl", "OCIPlatformInfo")
+
 _DOC = """Build a multi-architecture OCI compatible container image.
 
 It takes number of `oci_image` targets to create a fat multi-architecture image conforming to [OCI Image Index Specification](https://github.com/opencontainers/image-spec/blob/main/image-index.md).
@@ -97,6 +99,15 @@ def _expand_image_to_args(image, expander):
             args.append("--blob={}".format(file.tree_relative_path))
     return args
 
+def _add_platform_args(args, target):
+    """Adds --os=, --architecture=, and optionally --variant= args for the given target."""
+    if OCIPlatformInfo in target:
+        info = target[OCIPlatformInfo]
+        args.add("--os=" + info.os)
+        args.add("--architecture=" + info.cpu)
+        if info.variant:
+            args.add("--variant=" + info.variant)
+
 def _oci_image_index_impl(ctx):
     if len(ctx.attr.platforms) > 0 and len(ctx.attr.images) != len(ctx.attr.platforms):
         fail("platforms can only be specified when there is exactly one image in the images attribute.")
@@ -119,7 +130,21 @@ def _oci_image_index_impl(ctx):
 
     args = ctx.actions.args()
     args.add(output.path, format = "--output=%s")
-    args.add_all(ctx.files.images, map_each = _expand_image_to_args, expand_directories = False)
+
+    # Interleave --os=/--architecture=/[--variant=] with --image=/--blob= args per image so
+    # the shell script can match platform metadata to its image without index tracking.
+    if len(ctx.attr.platforms) > 0:
+        # Split-transition case: one image built for each platform.
+        # ctx.split_attr.images is a dict keyed by config index; values are lists of targets.
+        for config_targets in ctx.split_attr.images.values():
+            target = config_targets[0]
+            _add_platform_args(args, target)
+            args.add_all(target[DefaultInfo].files, map_each = _expand_image_to_args, expand_directories = False)
+    else:
+        # Non-split case: multiple pre-built images, each with its own platform.
+        for target in ctx.attr.images:
+            _add_platform_args(args, target)
+            args.add_all(target[DefaultInfo].files, map_each = _expand_image_to_args, expand_directories = False)
 
     ctx.actions.run(
         inputs = ctx.files.images,

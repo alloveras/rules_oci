@@ -211,10 +211,14 @@ def oci_pull(
             When set, repository must be set as well.
         repository: the image path beneath the registry, such as `distroless/static`.
             When set, registry must be set as well.
-        platforms: a list of the platforms the image supports. Mandatory for multi-architecture
-            images. Optional for single-architecture images, which expect a one-element list.
-            This creates a separate external repository for each platform, avoiding fetching layers,
-            and an alias that validates the presence of an image matching the target platform's cpu.
+        platforms: a list of the platforms the image supports, each in `os/arch` or
+            `os/arch/variant` format. Mandatory for multi-architecture images. Optional for
+            single-architecture images. When provided, this creates a separate external repository
+            for each platform, avoiding fetching layers, and an alias that validates the presence
+            of an image matching the target platform's cpu. Each per-platform target provides
+            `OCIPlatformInfo` with the `os`, `cpu`, and `variant` fields populated from the
+            platform string. When omitted for a single-architecture image, `OCIPlatformInfo`
+            is still provided, with fields populated from the image config metadata.
         digest: the digest string, starting with "sha256:", "sha512:", etc.
             If omitted, instructions for pinning are provided.
         tag: a tag to choose an image from the registry.
